@@ -6,21 +6,22 @@ DB_NAME = "attendance_online.db"
 
 
 def hash_password(password: str) -> str:
-    """Хеширует пароль для безопасного хранения в БД."""
+    """Хеширует пароль для безопасного хранения."""
     return hashlib.sha256(password.encode()).hexdigest()
 
 
 def init_db():
-    """Создает таблицы для веб-версии табеля."""
+    """Создает таблицы для веб-версии табеля с поддержкой ролей."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # Таблица сотрудников с паролями
+    # Таблица сотрудников (добавлена колонка is_admin)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL
+            password_hash TEXT NOT NULL,
+            is_admin INTEGER DEFAULT 0
         )
     """)
 
@@ -37,19 +38,21 @@ def init_db():
         )
     """)
 
-    # Создаем тестовых сотрудников, если их нет
+    # Создаем дефолтных пользователей, если таблица пуста
     cursor.execute("SELECT COUNT(*) FROM employees")
     if cursor.fetchone()[0] == 0:
-        # Пароль для всех по умолчанию: "pass123"
+        # Пароль для всех: pass123
         default_hash = hash_password("pass123")
-        sample_employees = [
-            ("Иванов И.И.", default_hash),
-            ("Петров П.П.", default_hash),
-            ("Сидоров С.С.", default_hash),
+
+        # Создаем одного администратора и двух обычных сотрудников
+        users = [
+            ("Администратор", default_hash, 1),
+            ("Иванов И.И.", default_hash, 0),
+            ("Петров П.П.", default_hash, 0),
         ]
         cursor.executemany(
-            "INSERT INTO employees (name, password_hash) VALUES (?, ?)",
-            sample_employees,
+            "INSERT INTO employees (name, password_hash, is_admin) VALUES (?, ?, ?)",
+            users,
         )
 
     conn.commit()
@@ -57,13 +60,13 @@ def init_db():
 
 
 def verify_user(name: str, password: str):
-    """Проверяет имя и пароль пользователя. Возвращает (ID, Имя) или None."""
+    """Проверяет имя, пароль. Возвращает (ID, Имя, is_admin) или None."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     p_hash = hash_password(password)
 
     cursor.execute(
-        "SELECT id, name FROM employees WHERE name = ? AND password_hash = ?",
+        "SELECT id, name, is_admin FROM employees WHERE name = ? AND password_hash = ?",
         (name, p_hash),
     )
     user = cursor.fetchone()
@@ -71,8 +74,52 @@ def verify_user(name: str, password: str):
     return user
 
 
-# Остальные функции (start_shift, end_shift, get_history, check_forgotten_shifts)
-# остаются такими же, как в GUI-версии, но адаптированы под веб:
+def add_new_employee(name: str, password: str) -> tuple[bool, str]:
+    """Регистрация нового сотрудника в системе."""
+    if not name or not password:
+        return False, "Имя и пароль не могут быть пустыми!"
+
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    try:
+        p_hash = hash_password(password)
+        cursor.execute(
+            "INSERT INTO employees (name, password_hash, is_admin) VALUES (?, ?, 0)",
+            (name.strip(), p_hash),
+        )
+        conn.commit()
+        return True, f"Сотрудник {name} успешно зарегистрирован!"
+    except sqlite3.IntegrityError:
+        return False, "Сотрудник с таким ФИО уже существует!"
+    finally:
+        conn.close()
+
+
+def get_admin_stats():
+    """Собирает общую аналитику для панели управления."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. Сколько всего сотрудников зарегистрировано (исключая админа)
+    cursor.execute("SELECT COUNT(*) FROM employees WHERE is_admin = 0")
+    total_emp = cursor.fetchone()[0]
+
+    # 2. Кто сейчас находится на смене (end_time пустой)
+    cursor.execute(
+        """
+        SELECT employees.name, shifts.start_time 
+        FROM shifts 
+        JOIN employees ON shifts.employee_id = employees.id 
+        WHERE shifts.date = ? AND shifts.end_time IS NULL
+    """,
+        (current_date,),
+    )
+    active_now = cursor.fetchall()
+
+    conn.close()
+    return {"total_employees": total_emp, "active_now": active_now}
 
 
 def start_shift(employee_id):
@@ -138,7 +185,6 @@ def end_shift(employee_id):
 
 
 def get_employee_history(employee_id):
-    """Возвращает историю конкретного сотрудника для вывода в его личном кабинете."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute(

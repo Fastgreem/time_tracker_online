@@ -1,22 +1,25 @@
 import sys
 import os
-from fastapi import FastAPI, Request, Form, Response, Depends
+from fastapi import FastAPI, Request, Form, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from datetime import datetime
-from urllib.parse import (
-    quote,
-    unquote,
-)  # Добавили для работы с русскими буквами в Cookie
+from urllib.parse import quote, unquote
 
-# Подтягиваем папку src в пути поиска модулей
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from database import init_db, verify_user, start_shift, end_shift, get_employee_history
+from database import (
+    init_db,
+    verify_user,
+    start_shift,
+    end_shift,
+    get_employee_history,
+    add_new_employee,
+    get_admin_stats,
+)
 from mailer import send_report_by_email
 
 app = FastAPI(title="Онлайн-Табель")
-
 templates = Jinja2Templates(directory="templates")
 
 
@@ -26,35 +29,50 @@ def startup_event():
 
 
 def get_current_user(request: Request):
-    """Проверяет авторизацию и безопасно раскодирует русское имя из Cookie."""
+    """Проверяет Cookie. Возвращает словарь с данными пользователя или None."""
     user_id = request.cookies.get("user_id")
     raw_user_name = request.cookies.get("user_name")
+    is_admin = request.cookies.get("is_admin")
 
     if not user_id or not raw_user_name:
         return None
 
-    # Раскодируем имя обратно из веб-формата в нормальный русский текст
-    user_name = unquote(raw_user_name)
-    return {"id": int(user_id), "name": user_name}
+    return {
+        "id": int(user_id),
+        "name": unquote(raw_user_name),
+        "is_admin": int(is_admin) if is_admin else 0,
+    }
 
 
-# --- МАРШРУТЫ АВТОРИЗАЦИИ (LOGIN / LOGOUT) ---
+# --- МАРШРУТЫ ИНТЕРФЕЙСА ---
 
 
 @app.get("/", response_class=HTMLResponse)
 def index_page(request: Request):
+    """Маршрутизатор главной страницы в зависимости от роли."""
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
 
-    history = get_employee_history(user["id"])
-    message = (
-        request.query_params.get("message")
-        if request.query_params.get("message")
-        else ""
-    )
+    message = unquote(request.query_params.get("message", ""))
     current_month = datetime.now().strftime("%Y-%m")
 
+    # ЕСЛИ ВОШЕЛ АДМИН: показываем админ-панель
+    if user["is_admin"] == 1:
+        stats = get_admin_stats()
+        return templates.TemplateResponse(
+            "admin.html",
+            {
+                "request": request,
+                "user_name": user["name"],
+                "message": message,
+                "current_month": current_month,
+                "stats": stats,
+            },
+        )
+
+    # ЕСЛИ ВОШЕЛ СОТРУДНИК: показываем его личный табель
+    history = get_employee_history(user["id"])
     return templates.TemplateResponse(
         "index.html",
         {
@@ -67,15 +85,15 @@ def index_page(request: Request):
     )
 
 
+# --- АВТОРИЗАЦИЯ И ЛОГИН ---
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     user = get_current_user(request)
     if user:
         return RedirectResponse(url="/", status_code=303)
-
-    error = (
-        request.query_params.get("error") if request.query_params.get("error") else ""
-    )
+    error = unquote(request.query_params.get("error", ""))
     return templates.TemplateResponse(
         "login.html", {"request": request, "error": error}
     )
@@ -89,17 +107,15 @@ def handle_login(
 
     if not user:
         return RedirectResponse(
-            url="/login?error=Неверное ФИО или пароль!", status_code=303
+            url=f"/login?error={quote('Неверное ФИО или пароль!')}", status_code=303
         )
 
-    user_id, user_name = user
+    user_id, user_name, is_admin = user
     redirect = RedirectResponse(url="/", status_code=303)
 
-    # Защита: кодируем имя в безопасный формат (например, "Иванов" станет "%D0%98%D0%B2...")
-    safe_user_name = quote(user_name)
-
     redirect.set_cookie(key="user_id", value=str(user_id), httponly=True)
-    redirect.set_cookie(key="user_name", value=safe_user_name, httponly=True)
+    redirect.set_cookie(key="user_name", value=quote(user_name), httponly=True)
+    redirect.set_cookie(key="is_admin", value=str(is_admin), httponly=True)
     return redirect
 
 
@@ -108,17 +124,18 @@ def handle_logout():
     redirect = RedirectResponse(url="/login", status_code=303)
     redirect.delete_cookie("user_id")
     redirect.delete_cookie("user_name")
+    redirect.delete_cookie("is_admin")
     return redirect
 
 
-# --- МАРШРУТЫ СМЕН (ВХОД / ВЫХОД) ---
+# --- УПРАВЛЕНИЕ СМЕНАМИ ДЛЯ СОТРУДНИКОВ ---
 
 
 @app.post("/start")
 def do_start_shift(request: Request):
     user = get_current_user(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
+    if not user or user["is_admin"] == 1:
+        return RedirectResponse(url="/", status_code=303)
 
     success, message = start_shift(user["id"])
     return RedirectResponse(url=f"/?message={quote(message)}", status_code=303)
@@ -127,14 +144,27 @@ def do_start_shift(request: Request):
 @app.post("/end")
 def do_end_shift(request: Request):
     user = get_current_user(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
+    if not user or user["is_admin"] == 1:
+        return RedirectResponse(url="/", status_code=303)
 
     success, message = end_shift(user["id"])
     return RedirectResponse(url=f"/?message={quote(message)}", status_code=303)
 
 
-# --- МАРШРУТ ОТПРАВКИ ОТЧЕТА НА EMAIL ---
+# --- ДЕЙСТВИЯ АДМИНИСТРАТОРА ---
+
+
+@app.post("/admin/register")
+def do_register_employee(
+    request: Request, new_username: str = Form(...), new_password: str = Form(...)
+):
+    """Точка регистрации нового сотрудника (доступна только админу)."""
+    user = get_current_user(request)
+    if not user or user["is_admin"] != 1:
+        return RedirectResponse(url="/", status_code=303)
+
+    success, message = add_new_employee(new_username, new_password)
+    return RedirectResponse(url=f"/?message={quote(message)}", status_code=303)
 
 
 @app.post("/send-report")
@@ -145,7 +175,7 @@ def do_send_report(request: Request, month: str = Form(...)):
 
     if len(month) != 7 or "-" not in month:
         return RedirectResponse(
-            url=f"/?message={quote('Ошибка: Неверный формат месяца! Используйте ГГГГ-ММ')}",
+            url=f"/?message={quote('Ошибка: Неверный формат периода!')}",
             status_code=303,
         )
 

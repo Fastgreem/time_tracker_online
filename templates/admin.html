@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Панель администратора</title>
+    <style>
+        :root {
+            --bg-color: #121214;
+            --card-bg: #1a1a1e;
+            --text-color: #e1e1e6;
+            --text-secondary: #8d8d99;
+            --border-color: #29292e;
+            --primary: #00b37e;
+            --info: #00a3ff;
+            --danger: #f75a68;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 24px; }
+        header h3 span { color: var(--danger); font-weight: bold; }
+        .logout-link { color: var(--text-secondary); text-decoration: none; font-size: 14px; padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 4px; }
+        .logout-link:hover { color: #fff; background-color: var(--border-color); }
+        
+        .alert { background-color: var(--card-bg); border-left: 4px solid var(--primary); padding: 16px; border-radius: 4px; margin-bottom: 24px; }
+        
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 32px; }
+        .card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; }
+        .card h4 { font-size: 16px; margin-bottom: 16px; text-transform: uppercase; color: var(--info); }
+        
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 14px; margin-bottom: 6px; }
+        .form-group input { width: 100%; background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; }
+        .form-group input:focus { outline: none; border-color: var(--info); }
+        .btn-submit { width: 100%; background-color: var(--primary); border: none; border-radius: 6px; padding: 12px; color: #fff; font-weight: bold; cursor: pointer; }
+        
+        .mail-form { display: flex; gap: 10px; margin-top: 10px; }
+        .mail-form input { background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; text-align: center; width: 110px; }
+        .btn-mail { background-color: var(--info); border: none; border-radius: 6px; padding: 10px; color: #fff; font-weight: bold; cursor: pointer; flex: 1; }
+        
+        ul { list-style: none; }
+        li { padding: 10px 0; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; }
+        li:last-child { border-bottom: none; }
+        .badge-live { background-color: rgba(0, 179, 126, 0.1); color: var(--primary); padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h3>Панель управления: <span>{{ user_name }}</span></h3>
+            <a href="/logout" class="logout-link">Выйти из панели</a>
+        </header>
+
+        {% if message %}
+            <div class="alert">{{ message }}</div>
+        {% endif %}
+
+        <div class="grid">
+            <!-- КАРТОЧКА: РЕГИСТРАЦИЯ -->
+            <div class="card">
+                <h4>Регистрация сотрудника</h4>
+                <form action="/admin/register" method="post">
+                    <div class="form-group">
+                        <label>ФИО нового сотрудника</label>
+                        <input type="text" name="new_username" placeholder="Сидоров С.С." required autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label>Временный пароль</label>
+                        <input type="password" name="new_password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" class="btn-submit">Внести в базу данных</button>
+                </form>
+            </div>
+
+            <!-- КАРТОЧКА: ОТЧЕТНОСТЬ -->
+            <div class="card">
+                <h4>Сводный отчет за месяц</h4>
+                <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 15px;">Генерация общего табеля по всем сотрудникам и отправка его на почту бухгалтерии.</p>
+                <form action="/send-report" method="post" class="mail-form">
+                    <input type="text" name="month" value="{{ current_month }}" required maxlength="7">
+                    <button type="submit" class="btn-mail">✉ Отправить отчет бухгалтеру</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- КАРТОЧКА: МОНИТОРИНГ И СТАТИСТИКА -->
+        <div class="card" style="margin-bottom: 24px;">
+            <h4 style="color: var(--primary);">Живой мониторинг смен на сегодня</h4>
+            <!-- Исправлено: берем первый элемент кортежа количества из базы данных -->
+            <p style="margin-bottom: 15px; font-size: 14px; color: var(--text-secondary);">Всего сотрудников в штате: <strong>{{ stats.total_employees[0] }}</strong></p>
+            
+            <ul>
+                {% for emp in stats.active_now %}
+                <li>
+                    <!-- Исправлено: emp[0] это Имя, emp[1] это Время старта -->
+                    <span>👤 {{ emp[0] }}</span>
+                    <span class="badge-live">Работает с {{ emp[1] }}</span>
+                </li>
+                {% else %}
+                <li style="color: var(--text-secondary); padding: 10px 0;">На данный момент никто не открыл рабочую смену.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
