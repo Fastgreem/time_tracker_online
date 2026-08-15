@@ -97,29 +97,47 @@ def add_new_employee(name: str, password: str) -> tuple[bool, str]:
 
 
 def get_admin_stats():
-    """Собирает общую аналитику для панели управления."""
+    """Собирает расширенную аналитику для панели управления за текущий день."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     current_date = datetime.now().strftime("%Y-%m-%d")
 
     # 1. Сколько всего сотрудников зарегистрировано (исключая админа)
     cursor.execute("SELECT COUNT(*) FROM employees WHERE is_admin = 0")
-    total_emp = cursor.fetchone()[0]
+    total_emp = cursor.fetchone()[0]  # Берем число напрямую
 
-    # 2. Кто сейчас находится на смене (end_time пустой)
+    # 2. Кто сейчас на смене (end_time IS NULL)
     cursor.execute(
         """
         SELECT employees.name, shifts.start_time 
         FROM shifts 
         JOIN employees ON shifts.employee_id = employees.id 
         WHERE shifts.date = ? AND shifts.end_time IS NULL
+        ORDER BY shifts.start_time DESC
     """,
         (current_date,),
     )
     active_now = cursor.fetchall()
 
+    # 3. Кто уже закончил работать сегодня (end_time IS NOT NULL)
+    cursor.execute(
+        """
+        SELECT employees.name, shifts.start_time, shifts.end_time, shifts.duration
+        FROM shifts 
+        JOIN employees ON shifts.employee_id = employees.id 
+        WHERE shifts.date = ? AND shifts.end_time IS NOT NULL
+        ORDER BY shifts.end_time DESC
+    """,
+        (current_date,),
+    )
+    finished_today = cursor.fetchall()
+
     conn.close()
-    return {"total_employees": total_emp, "active_now": active_now}
+    return {
+        "total_employees": total_emp,
+        "active_now": active_now,
+        "finished_today": finished_today,
+    }
 
 
 def start_shift(employee_id):
@@ -194,3 +212,55 @@ def get_employee_history(employee_id):
     rows = cursor.fetchall()
     conn.close()
     return rows
+
+
+def get_employee_history_by_month(employee_id: int, target_month: str):
+    """Возвращает историю смен конкретного сотрудника за выбранный месяц (YYYY-MM)."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT date, start_time, end_time, duration 
+        FROM shifts 
+        WHERE employee_id = ? AND date LIKE ? 
+        ORDER BY date DESC
+    """,
+        (employee_id, f"{target_month}%"),
+    )
+
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_workers():
+    """Возвращает список всех сотрудников (исключая администраторов) для админки."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM employees WHERE is_admin = 0 ORDER BY name")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def reset_employee_password(employee_id: int) -> tuple[bool, str]:
+    """Сбрасывает пароль сотрудника на дефолтный 'pass123'."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    try:
+        # Хешируем стандартный пароль
+        new_hash = hash_password("pass123")
+
+        # Обновляем запись в базе данных
+        cursor.execute(
+            "UPDATE employees SET password_hash = ? WHERE id = ?",
+            (new_hash, employee_id),
+        )
+        conn.commit()
+        return True, "Пароль успешно сброшен на стандартный: pass123"
+    except Exception as e:
+        return False, f"Ошибка при сбросе пароля: {str(e)}"
+    finally:
+        conn.close()

@@ -16,7 +16,11 @@ from database import (
     get_employee_history,
     add_new_employee,
     get_admin_stats,
+    get_all_workers,
+    get_employee_history_by_month,
+    reset_employee_password,
 )
+
 from mailer import send_report_by_email
 
 app = FastAPI(title="Онлайн-Табель")
@@ -29,7 +33,6 @@ def startup_event():
 
 
 def get_current_user(request: Request):
-    """Проверяет Cookie. Возвращает словарь с данными пользователя или None."""
     user_id = request.cookies.get("user_id")
     raw_user_name = request.cookies.get("user_name")
     is_admin = request.cookies.get("is_admin")
@@ -49,7 +52,6 @@ def get_current_user(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def index_page(request: Request):
-    """Маршрутизатор главной страницы в зависимости от роли."""
     user = get_current_user(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -57,9 +59,9 @@ def index_page(request: Request):
     message = unquote(request.query_params.get("message", ""))
     current_month = datetime.now().strftime("%Y-%m")
 
-    # ЕСЛИ ВОШЕЛ АДМИН: показываем админ-панель
     if user["is_admin"] == 1:
         stats = get_admin_stats()
+        workers = get_all_workers()  # Достаем список сотрудников для архива
         return templates.TemplateResponse(
             "admin.html",
             {
@@ -68,10 +70,13 @@ def index_page(request: Request):
                 "message": message,
                 "current_month": current_month,
                 "stats": stats,
+                "workers": workers,
+                "archive_history": None,  # При первой загрузке архив пуст
+                "selected_worker": None,
+                "selected_month": current_month,
             },
         )
 
-    # ЕСЛИ ВОШЕЛ СОТРУДНИК: показываем его личный табель
     history = get_employee_history(user["id"])
     return templates.TemplateResponse(
         "index.html",
@@ -81,6 +86,38 @@ def index_page(request: Request):
             "history": history,
             "message": message,
             "current_month": current_month,
+        },
+    )
+
+
+@app.post("/admin/view-archive", response_class=HTMLResponse)
+def view_archive(
+    request: Request, worker_id: int = Form(...), archive_month: str = Form(...)
+):
+    """Маршрут для просмотра табелей в админке по фильтрам."""
+    user = get_current_user(request)
+    if not user or user["is_admin"] != 1:
+        return RedirectResponse(url="/", status_code=303)
+
+    current_month = datetime.now().strftime("%Y-%m")
+    stats = get_admin_stats()
+    workers = get_all_workers()
+
+    # Получаем отфильтрованную историю смен из БД
+    archive_history = get_employee_history_by_month(worker_id, archive_month.strip())
+
+    return templates.TemplateResponse(
+        "admin.html",
+        {
+            "request": request,
+            "user_name": user["name"],
+            "message": "",
+            "current_month": current_month,
+            "stats": stats,
+            "workers": workers,
+            "archive_history": archive_history,
+            "selected_worker": worker_id,
+            "selected_month": archive_month,
         },
     )
 
@@ -158,7 +195,6 @@ def do_end_shift(request: Request):
 def do_register_employee(
     request: Request, new_username: str = Form(...), new_password: str = Form(...)
 ):
-    """Точка регистрации нового сотрудника (доступна только админу)."""
     user = get_current_user(request)
     if not user or user["is_admin"] != 1:
         return RedirectResponse(url="/", status_code=303)
@@ -181,3 +217,14 @@ def do_send_report(request: Request, month: str = Form(...)):
 
     success, email_message = send_report_by_email(month.strip())
     return RedirectResponse(url=f"/?message={quote(email_message)}", status_code=303)
+
+
+@app.post("/admin/reset-password")
+def do_reset_password(request: Request, worker_id: int = Form(...)):
+    """Точка сброса пароля сотрудника администратором."""
+    user = get_current_user(request)
+    if not user or user["is_admin"] != 1:
+        return RedirectResponse(url="/", status_code=303)
+
+    success, message = reset_employee_password(worker_id)
+    return RedirectResponse(url=f"/?message={quote(message)}", status_code=303)

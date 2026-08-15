@@ -31,13 +31,25 @@
         
         .form-group { margin-bottom: 15px; }
         .form-group label { display: block; font-size: 14px; margin-bottom: 6px; }
-        .form-group input { width: 100%; background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; }
-        .form-group input:focus { outline: none; border-color: var(--info); }
+        .form-group input, .form-group select { width: 100%; background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--info); }
         .btn-submit { width: 100%; background-color: var(--primary); border: none; border-radius: 6px; padding: 12px; color: #fff; font-weight: bold; cursor: pointer; }
         
         .mail-form { display: flex; gap: 10px; margin-top: 10px; }
         .mail-form input { background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; text-align: center; width: 110px; }
         .btn-mail { background-color: var(--info); border: none; border-radius: 6px; padding: 10px; color: #fff; font-weight: bold; cursor: pointer; flex: 1; }
+        
+        /* Стили фильтров архива */
+        .archive-form { display: flex; gap: 15px; align-items: flex-end; margin-bottom: 20px; }
+        .archive-form .form-group { margin-bottom: 0; flex: 1; }
+        .btn-search { background-color: var(--info); border: none; border-radius: 6px; padding: 11px 20px; color: #fff; font-weight: bold; cursor: pointer; }
+        
+        /* Стили таблицы */
+        .table-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; margin-top: 15px; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th { background-color: #202024; padding: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; font-size: 11px; }
+        td { padding: 12px; border-bottom: 1px solid var(--border-color); color: var(--text-color); }
+        tr:hover td { background-color: #202024; }
         
         ul { list-style: none; }
         li { padding: 10px 0; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; }
@@ -60,7 +72,7 @@
             <!-- КАРТОЧКА: РЕГИСТРАЦИЯ -->
             <div class="card">
                 <h4>Регистрация сотрудника</h4>
-                <form action="/admin/register" method="post">
+                <form action="/admin/register" method="post" style="margin-bottom: 25px;">
                     <div class="form-group">
                         <label>ФИО нового сотрудника</label>
                         <input type="text" name="new_username" placeholder="Сидоров С.С." required autocomplete="off">
@@ -71,7 +83,21 @@
                     </div>
                     <button type="submit" class="btn-submit">Внести в базу данных</button>
                 </form>
+
+                <!-- НАЧАЛО НОВОЙ ФОРМЫ СБРОСА ПАРОЛЯ -->
+                <h4 style="color: var(--danger); font-size: 14px; margin-bottom: 10px; border-top: 1px solid var(--border-color); padding-top: 15px;">Сброс пароля</h4>
+                <form action="/admin/reset-password" method="post" style="display: flex; gap: 10px; align-items: center;">
+                    <select name="worker_id" required style="background-color: #121214; border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; color: #fff; font-size: 14px; flex: 1;">
+                        <option value="" disabled selected>-- Кому сбросить? --</option>
+                        {% for w in workers %}
+                            <option value="{{ w[0] }}">{{ w[1] }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" style="background-color: var(--danger); border: none; border-radius: 6px; padding: 11px 15px; color: #fff; font-weight: bold; cursor: pointer; font-size: 13px;">Сбросить</button>
+                </form>
+                <!-- КОНЕЦ ФОРМЫ СБРОСА ПАРОЛЯ -->
             </div>
+
 
             <!-- КАРТОЧКА: ОТЧЕТНОСТЬ -->
             <div class="card">
@@ -85,22 +111,89 @@
         </div>
 
         <!-- КАРТОЧКА: МОНИТОРИНГ И СТАТИСТИКА -->
-        <div class="card" style="margin-bottom: 24px;">
+        <div class="card" style="margin-bottom: 32px;">
             <h4 style="color: var(--primary);">Живой мониторинг смен на сегодня</h4>
-            <!-- Исправлено: берем первый элемент кортежа количества из базы данных -->
-            <p style="margin-bottom: 15px; font-size: 14px; color: var(--text-secondary);">Всего сотрудников в штате: <strong>{{ stats.total_employees[0] }}</strong></p>
+            <p style="margin-bottom: 20px; font-size: 14px; color: var(--text-secondary);">Всего сотрудников в штате: <strong>{{ stats.total_employees[0] }}</strong></p>
             
-            <ul>
+            <h5 style="color: var(--info); font-size: 14px; margin-bottom: 10px; text-transform: uppercase;">Сейчас на работе:</h5>
+            <ul style="margin-bottom: 25px;">
                 {% for emp in stats.active_now %}
                 <li>
-                    <!-- Исправлено: emp[0] это Имя, emp[1] это Время старта -->
-                    <span>👤 {{ emp[0] }}</span>
+                    <span>👤 <strong>{{ emp[0] }}</strong></span>
                     <span class="badge-live">Работает с {{ emp[1] }}</span>
                 </li>
                 {% else %}
-                <li style="color: var(--text-secondary); padding: 10px 0;">На данный момент никто не открыл рабочую смену.</li>
+                <li style="color: var(--text-secondary); padding: 5px 0; font-size: 14px;">Действующих открытых смен нет.</li>
                 {% endfor %}
             </ul>
+
+            <h5 style="color: var(--text-secondary); font-size: 14px; margin-bottom: 10px; text-transform: uppercase;">Завершили день:</h5>
+            <ul>
+                {% for emp in stats.finished_today %}
+                <li>
+                    <span>👤 {{ emp[0] }} <span style="color: var(--text-secondary); font-size: 13px;">({{ emp[1] }} - {{ emp[2] }})</span></span>
+                    <span style="color: var(--primary); font-weight: 600; font-size: 14px;">✓ Отработано: {{ emp[3] }}</span>
+                </li>
+                {% else %}
+                <li style="color: var(--text-secondary); padding: 5px 0; font-size: 14px;">Сегодня еще никто не закрывал смены.</li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <!-- БЛОК: ИНТЕРАКТИВНЫЙ АРХИВ ТАБЕЛЕЙ -->
+        <div class="card" style="margin-bottom: 24px;">
+            <h4 style="color: var(--info);">🔍 Электронный архив табелей</h4>
+            <p style="margin-bottom: 15px; font-size: 14px; color: var(--text-secondary);">Выберите сотрудника и отчетный месяц для мгновенного просмотра истории его смен.</p>
+            
+            <form action="/admin/view-archive" method="post" class="archive-form">
+                <div class="form-group">
+                    <label>Сотрудник</label>
+                    <select name="worker_id" required>
+                        <option value="" disabled {% if not selected_worker %}selected{% endif %}>-- Выберите человека --</option>
+                        {% for w in workers %}
+                            <!-- w[0] это ID сотрудника, w[1] это его ФИО -->
+                            <option value="{{ w[0] }}" {% if selected_worker == w[0] %}selected{% endif %}>{{ w[1] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Период (ГГГГ-ММ)</label>
+                    <input type="text" name="archive_month" value="{{ selected_month }}" required maxlength="7" style="text-align: center;">
+                </div>
+                <button type="submit" class="btn-search">Показать историю</button>
+            </form>
+
+            <!-- Отображение таблицы результатов только если был сделан запрос -->
+            {% if archive_history is not none %}
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Время прихода</th>
+                                <th>Время ухода</th>
+                                <th>Отработано за день</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in archive_history %}
+                            <tr>
+                                <td><strong>{{ row[0] }}</strong></td>
+                                <td>{{ row[1] }}</td>
+                                <td>{{ row[2] if row[2] else "В процессе..." }}</td>
+                                <td>{{ row[3] if row[3] else "-" }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 20px;">
+                                    За выбранный период рабочие смены не найдены.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
         </div>
     </div>
 </body>
